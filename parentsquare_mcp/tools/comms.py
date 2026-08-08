@@ -63,7 +63,7 @@ def register(mcp: MCPServer) -> None:
         if page > 1:
             loaded = client.get_page(f"{routes.CONVERSATIONS[0]}?page={page}", optional=True)
         if loaded is None:
-            loaded = client.get_first_page(routes.CONVERSATIONS, label="conversations")
+            loaded = client.get_first_page(routes.CONVERSATIONS, label="conversations", section="conversations")
 
         items: list[dict[str, Any]] = []
         for el in rows(loaded.soup, CONVERSATION_ROWS):
@@ -154,7 +154,7 @@ def register(mcp: MCPServer) -> None:
         query: Annotated[str | None, Field(description="Case-insensitive filter on name and role.")] = None,
     ) -> dict[str, Any]:
         candidates = routes.school_directory(school_id) if school_id else routes.DIRECTORY
-        loaded = client.get_first_page(candidates, label="directory")
+        loaded = client.get_first_page(candidates, label="directory", section="directory")
         soup, url = loaded.soup, loaded.url
 
         items: list[dict[str, Any]] = []

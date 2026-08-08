@@ -18,11 +18,12 @@ want here. So this server signs in as you and reads the same parent web app you 
 Two consequences worth knowing up front:
 
 - **You need to supply your own session.** See [Authentication](#authentication).
-- **The page layouts are not a contract.** Districts run slightly different versions of the app, so
-  the URLs and HTML selectors are best-effort. Every route is a list of candidates that gets tried in
-  order, every parser degrades to returning the readable page text instead of failing, and
-  `scripts/doctor.py` tells you exactly which ones need adjusting for your district.
-  **Expect to run the doctor once and tweak a few things.** See [Fitting it to your district](#fitting-it-to-your-district).
+- **The page layouts are not a contract.** Districts run different versions of the app on different
+  URLs, so there are three layers of defence: every route is a list of candidate paths tried in
+  order; if all of them fail, the section is located by **matching its label in your sidebar**; and
+  if a parser still finds nothing, it returns the readable page text rather than failing.
+  `scripts/doctor.py` reports what needed which. See
+  [Fitting it to your district](#fitting-it-to-your-district).
 
 ---
 
@@ -109,17 +110,23 @@ It reports, for every section, which URL works and how many rows the parser got:
 
 ```
 — routes —
-  ok  feed               /feeds
-  ok  directory          /directory
-  MISS payments          (none of the candidates worked)
+  ok   feed              /feeds
+  ok   directory         /directory
+  NAV  payments          /school_pay  (found via the sidebar)
+  MISS volunteer_hours   (no candidate worked, and no sidebar link matched)
 
 — tools (23 registered) —
   ok   get_feeds              12 rows
   THIN list_signups           0 rows — selectors need work. Source: https://…/signups
 ```
 
-- **MISS** — your district uses a different URL. Find it in your browser and add it to the front of
-  the matching list in `parentsquare_mcp/routes.py`.
+- **NAV** — none of the guessed URLs worked, so the server found the section by matching its
+  **sidebar label** instead. This already works; adding the reported path to `routes.py` just saves a
+  lookup. Districts re-route these pages constantly, which is why label matching is the safety net.
+- **MISS** — no URL worked and no sidebar link matched. Open the section in your browser, copy the
+  path from the address bar, and add it to the front of the matching list in
+  `parentsquare_mcp/routes.py`. If the sidebar calls it something unusual, adding that word to
+  `SECTION_KEYWORDS` in the same file fixes it for good.
 - **THIN** — the page loaded but nothing matched. Ask Claude to call `debug_fetch` on that URL to see
   the real markup, then adjust the selector list at the top of the relevant file in
   `parentsquare_mcp/tools/`. The selectors are plain CSS lists, deliberately easy to edit.
@@ -207,7 +214,7 @@ are safe to run at any time.
 parentsquare_mcp/
   config.py      environment settings
   client.py      auth, HTTP, route fallback, login-bounce detection
-  routes.py      every URL, as ordered candidate lists   ← edit when doctor says MISS
+  routes.py      candidate URLs + sidebar keywords       ← edit when doctor says MISS
   parsers.py     shared HTML helpers and the fallback result shape
   media.py       attachments → images / PDF text
   tools/         one module per group of tools           ← edit when doctor says THIN

@@ -24,7 +24,7 @@ def discover_ics_url() -> str | None:
         return config.ics_url
 
     try:
-        page = client.get_first_page(routes.CALENDAR, label="calendar")
+        page = client.get_first_page(routes.CALENDAR, label="calendar", section="calendar")
     except Exception:  # noqa: BLE001 - absence is a normal outcome here
         return None
 
@@ -162,7 +162,7 @@ def register(mcp: MCPServer) -> None:
         html_page: Page | None = None
         if not events:
             try:
-                html_page = client.get_first_page(routes.CALENDAR, label="calendar")
+                html_page = client.get_first_page(routes.CALENDAR, label="calendar", section="calendar")
             except Exception:  # noqa: BLE001
                 html_page = None
             if html_page is not None:

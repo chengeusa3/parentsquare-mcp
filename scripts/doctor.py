@@ -93,13 +93,25 @@ def check_routes() -> dict[str, str | None]:
                 winner = candidate
             details.append(f"{candidate} → ok ({len(page.html) // 1024} KB)")
 
-        winners[name] = winner
-        colour = GREEN if winner else RED
-        mark = "ok " if winner else "MISS"
-        print(f"  {colour}{mark}{RESET} {name:<18} {winner or '(none of the candidates worked)'}")
-        if not winner or len(candidates) > 1:
-            for line in details:
-                print(f"       {DIM}{line}{RESET}")
+        if winner:
+            winners[name] = winner
+            print(f"  {GREEN}ok  {RESET} {name:<18} {winner}")
+            if len(candidates) > 1:
+                for line in details:
+                    print(f"       {DIM}{line}{RESET}")
+            continue
+
+        # No candidate worked — see whether the sidebar knows where it lives.
+        discovered = client.discover_section(name)
+        if discovered:
+            winners[name] = discovered
+            print(f"  {YELLOW}NAV {RESET} {name:<18} {discovered}  {DIM}(found via the sidebar){RESET}")
+            print(f"       {DIM}add '{discovered}' to routes.py to skip the lookup{RESET}")
+        else:
+            winners[name] = None
+            print(f"  {RED}MISS{RESET} {name:<18} (no candidate worked, and no sidebar link matched)")
+        for line in details:
+            print(f"       {DIM}{line}{RESET}")
 
     return winners
 
@@ -183,8 +195,9 @@ def main() -> int:
     asyncio.run(check_tools())
 
     print(
-        f"\n{DIM}Next: promote each winning route to the front of its list in parentsquare_mcp/routes.py, and "
-        f"for any THIN tool run debug_fetch on its source URL to see the real markup.{RESET}"
+        f"\n{DIM}Next: promote each winning route to the front of its list in parentsquare_mcp/routes.py "
+        f"(NAV routes work already — adding them just saves a lookup). For any MISS, find the URL in your "
+        f"browser. For any THIN tool, run debug_fetch on its source URL to see the real markup.{RESET}"
     )
     return 0
 

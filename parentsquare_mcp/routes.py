@@ -18,7 +18,8 @@ CALENDAR = ["/calendar", "/events"]
 CONVERSATIONS = ["/conversations", "/messages"]
 DIRECTORY = ["/directory", "/staff"]
 PHOTOS = ["/photos", "/gallery"]
-FILES = ["/files", "/documents"]
+# "documents" alone often means Secure Documents; plain file attachments live under feeds/files.
+FILES = ["/files", "/documents", "/feeds/files", "/secure_documents"]
 SIGNUPS = ["/signups", "/sign_ups"]
 NOTICES = ["/notices", "/alerts"]
 POLLS = ["/polls"]
@@ -78,6 +79,48 @@ def school_links(school_id: str) -> list[str]:
 def student(student_id: str) -> list[str]:
     return [f"/students/{student_id}"]
 
+
+#: Words that identify a section in the sidebar, when none of its candidate paths
+#: work. Districts rename and re-route these freely, so matching the visible
+#: label is more reliable than guessing another URL. Keep them lowercase.
+SECTION_KEYWORDS: dict[str, list[str]] = {
+    "feed": ["posts", "feed", "home"],
+    "calendar": ["calendar", "events"],
+    "conversations": ["messages", "conversations", "inbox", "direct message"],
+    "directory": ["directory", "staff", "contacts"],
+    "photos": ["photos", "gallery", "pictures"],
+    # Prefer the exact "Files" More-menu label over "Photos, Videos, Files".
+    "files": ["files", "documents", "resources", "secure documents"],
+    # Bottom nav often says "SignUp" as one word.
+    "signups": ["signup", "signups", "sign ups", "sign-ups", "rsvp", "volunteer signup"],
+    "notices": ["notices", "alerts", "secure documents"],
+    "polls": ["polls", "surveys"],
+    "forms": ["forms", "permission slips", "permission", "signatures", "sign forms"],
+    "payments": ["payments", "pay", "fees", "store", "invoices", "billing"],
+    "volunteer_hours": ["volunteer hours", "volunteer", "hours"],
+    "schools": ["schools", "my schools"],
+    "groups": ["groups", "classes"],
+    "links": ["links", "quick links", "resources"],
+    "students": ["students", "my students", "children"],
+}
+
+#: When the static HTML sidebar has no match (common for the JS bottom-nav
+#: items like SignUp / More → Polls), try these paths under the current school.
+SCHOOL_SCOPED_SUFFIXES: dict[str, list[str]] = {
+    "feed": ["feeds"],
+    "calendar": ["calendars", "calendar", "events"],
+    "conversations": ["messages", "conversations"],  # usually /users/<id>/chats
+    "directory": ["users", "directory", "staff"],
+    "photos": ["feeds/photos", "photos", "gallery"],
+    "files": ["feeds/files", "secure_documents", "files", "documents"],
+    "signups": ["sign_ups", "signups"],
+    "notices": ["notices?html=true", "notices", "alerts"],
+    "polls": ["polls", "surveys"],
+    "forms": ["forms", "permission_slips"],
+    "payments": ["payments", "store", "fees"],
+    "groups": ["groups"],
+    "links": ["links", "quick_links"],
+}
 
 #: Sidebar entries we recognise, used to classify a school's available sections.
 KNOWN_SECTIONS = [

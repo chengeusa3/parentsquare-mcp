@@ -37,7 +37,15 @@ SIGNIN = """<html><body><h1>Sign in to ParentSquare</h1>
   <input type="password" name="user[password]">
 </form></body></html>"""
 
-FEED = """<html><body><main>
+# The sidebar is what route discovery mines when candidate paths all 404.
+FEED = """<html><body>
+<nav class="sidebar">
+  <a href="/feeds">Posts</a>
+  <a href="/my_forms">Forms</a>
+  <a href="/school_pay">Payments</a>
+  <a href="/dm">Messages</a>
+</nav>
+<main>
 <div class="feed-item" data-post-id="9001">
   <h3 class="post-title"><a href="/feeds/9001">Field Trip to the Aquarium</a></h3>
   <span class="author">Ms. Rivera</span>
@@ -96,6 +104,23 @@ DOCUMENTS = """<html><body><main><ul>
 <li class="file"><a href="/files/1/menu.pdf">Lunch Menu</a></li>
 </ul></main></body></html>"""
 
+# These three sit at paths no candidate list knows about — reachable only by
+# matching their sidebar labels. This is the case a real district hits.
+MY_FORMS = """<html><body><main><ul>
+<li class="form"><a href="/forms/1">Field Trip Permission Slip</a> unsigned, due Sep 5</li>
+<li class="form"><a href="/forms/2">Media Release</a> signed</li>
+</ul></main></body></html>"""
+
+SCHOOL_PAY = """<html><body><main><ul>
+<li class="payment"><a href="/payments/1">Yearbook</a> <span class="price">$25.00</span> unpaid</li>
+<li class="payment"><a href="/payments/2">Field Trip Fee</a> <span class="price">$12.50</span> paid</li>
+</ul></main></body></html>"""
+
+DM = """<html><body><main><ul>
+<li class="conversation"><a href="/conversations/12">Ms. Rivera</a>
+    <span class="preview">About Friday's trip</span></li>
+</ul></main></body></html>"""
+
 ROUTES: dict[str, tuple[str, bytes]] = {
     "/signin": ("text/html", SIGNIN.encode()),
     "/feeds": ("text/html", FEED.encode()),
@@ -108,6 +133,9 @@ ROUTES: dict[str, tuple[str, bytes]] = {
     "/photos/whale.png": ("image/png", PNG),
     "/polls": ("text/html", EMPTY_PAGE.encode()),
     "/documents": ("text/html", DOCUMENTS.encode()),
+    "/my_forms": ("text/html", MY_FORMS.encode()),
+    "/school_pay": ("text/html", SCHOOL_PAY.encode()),
+    "/dm": ("text/html", DM.encode()),
 }
 
 failures: list[str] = []
@@ -256,6 +284,35 @@ async def run_checks(mcp) -> None:
     files = payload(await mcp.call_tool("list_files", {}))
     check("list_files falls back to /documents", files["count"] == 1, str(files.get("count")))
     check("list_files reads the name", files["files"][0]["name"] == "Lunch Menu", str(files.get("files")))
+
+    print("\nsidebar route discovery (no candidate path works)")
+    forms = payload(await mcp.call_tool("list_forms", {}))
+    check("list_forms discovers /my_forms", forms["source"].endswith("/my_forms"), str(forms.get("source")))
+    check("list_forms reads both rows", forms["count"] == 2, str(forms.get("count")))
+    check(
+        "list_forms flags the outstanding one",
+        forms["outstanding_count"] == 1,
+        str(forms.get("outstanding_count")),
+    )
+    check(
+        "list_forms reads the status",
+        forms["forms"][0]["status"] == "unsigned",
+        str(forms["forms"][0]),
+    )
+
+    payments = payload(await mcp.call_tool("list_payments", {}))
+    check("list_payments discovers /school_pay", payments["source"].endswith("/school_pay"), str(payments.get("source")))
+    check("list_payments reads prices", payments["summary"]["total_listed"] == 37.5, str(payments.get("summary")))
+    check(
+        "list_payments totals only what is unpaid",
+        payments["summary"]["total_outstanding"] == 25.0,
+        str(payments.get("summary")),
+    )
+
+    dms = payload(await mcp.call_tool("list_conversations", {}))
+    check("list_conversations discovers /dm", dms["source"].endswith("/dm"), str(dms.get("source")))
+    check("list_conversations reads the thread", dms["count"] == 1, str(dms.get("count")))
+    check("list_conversations reads the id", dms["conversations"][0]["id"] == "12", str(dms["conversations"][0]))
 
     polls = payload(await mcp.call_tool("list_polls", {}))
     check("an empty section degrades to page_text", "page_text" in polls, str(list(polls)))

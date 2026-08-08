@@ -37,7 +37,7 @@ def register(mcp: MCPServer) -> None:
         if page > 1:
             loaded = client.get_page(f"{candidates[0]}?page={page}", optional=True)
         if loaded is None:
-            loaded = client.get_first_page(candidates, label="photos")
+            loaded = client.get_first_page(candidates, label="photos", section="photos")
 
         items: list[dict[str, Any]] = []
         for el in rows(loaded.soup, PHOTO_ROWS):
@@ -84,7 +84,7 @@ def register(mcp: MCPServer) -> None:
         query: Annotated[str | None, Field(description="Case-insensitive filter on file name.")] = None,
     ) -> dict[str, Any]:
         candidates = routes.school_files(school_id) if school_id else routes.FILES
-        loaded = client.get_first_page(candidates, label="files")
+        loaded = client.get_first_page(candidates, label="files", section="files")
 
         items: list[dict[str, Any]] = []
         for el in rows(loaded.soup, FILE_ROWS):

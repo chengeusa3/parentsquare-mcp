@@ -40,7 +40,7 @@ def register(mcp: MCPServer) -> None:
         ),
     )
     def list_schools() -> dict[str, Any]:
-        loaded = client.get_first_page(routes.SCHOOLS, label="schools")
+        loaded = client.get_first_page(routes.SCHOOLS, label="schools", section="schools")
         soup, url = loaded.soup, loaded.url
 
         schools: list[dict[str, Any]] = []
@@ -145,7 +145,7 @@ def register(mcp: MCPServer) -> None:
         query: Annotated[str | None, Field(description="Case-insensitive filter on group name and description.")] = None,
     ) -> dict[str, Any]:
         candidates = routes.school_groups(school_id) if school_id else routes.GROUPS
-        loaded = client.get_first_page(candidates, label="groups")
+        loaded = client.get_first_page(candidates, label="groups", section="groups")
         soup, url = loaded.soup, loaded.url
 
         items: list[dict[str, Any]] = []
@@ -187,7 +187,7 @@ def register(mcp: MCPServer) -> None:
         school_id: Annotated[str | None, Field(description="Limit to one school (see list_schools).")] = None,
     ) -> dict[str, Any]:
         candidates = routes.school_links(school_id) if school_id else routes.LINKS
-        loaded = client.get_first_page(candidates, label="links")
+        loaded = client.get_first_page(candidates, label="links", section="links")
         soup, url = loaded.soup, loaded.url
 
         items: list[dict[str, Any]] = []
@@ -226,7 +226,7 @@ def register(mcp: MCPServer) -> None:
         student_id: Annotated[str | None, Field(description="Student id from list_schools. Omit for the default student.")] = None,
     ) -> dict[str, Any]:
         candidates = routes.student(student_id) if student_id else routes.STUDENTS
-        loaded = client.get_first_page(candidates, label="student dashboard")
+        loaded = client.get_first_page(candidates, label="student dashboard", section="students")
         soup, url = loaded.soup, loaded.url
 
         container = first(soup, [".student-detail", ".dashboard", "main", "#content"]) or soup.body

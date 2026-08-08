@@ -93,7 +93,7 @@ def register(mcp: MCPServer) -> None:
         ),
     )
     def list_signups() -> dict[str, Any]:
-        loaded = client.get_first_page(routes.SIGNUPS, label="signups")
+        loaded = client.get_first_page(routes.SIGNUPS, label="signups", section="signups")
 
         def enrich(row, text, el):
             row["progress"] = progress(text)
@@ -114,7 +114,7 @@ def register(mcp: MCPServer) -> None:
         description="Alerts, urgent notices and secure documents sent to your account.",
     )
     def list_notices() -> dict[str, Any]:
-        loaded = client.get_first_page(routes.NOTICES, label="notices")
+        loaded = client.get_first_page(routes.NOTICES, label="notices", section="notices")
 
         def enrich(row, text, el):
             lowered = text.lower()
@@ -137,7 +137,7 @@ def register(mcp: MCPServer) -> None:
         description="Polls with their options, vote counts and the option currently in the lead.",
     )
     def list_polls() -> dict[str, Any]:
-        loaded = client.get_first_page(routes.POLLS, label="polls")
+        loaded = client.get_first_page(routes.POLLS, label="polls", section="polls")
 
         def enrich(row, text, el):
             options = []
@@ -161,7 +161,7 @@ def register(mcp: MCPServer) -> None:
         description="Permission slips and signable forms, with whether each one is still outstanding.",
     )
     def list_forms() -> dict[str, Any]:
-        loaded = client.get_first_page(routes.FORMS, label="forms")
+        loaded = client.get_first_page(routes.FORMS, label="forms", section="forms")
 
         def enrich(row, text, el):
             row["status"] = _status_from(text)
@@ -180,7 +180,7 @@ def register(mcp: MCPServer) -> None:
         description="Payment items and fees with prices, plus totals for what is due and what is paid.",
     )
     def list_payments() -> dict[str, Any]:
-        loaded = client.get_first_page(routes.PAYMENTS, label="payments")
+        loaded = client.get_first_page(routes.PAYMENTS, label="payments", section="payments")
 
         def enrich(row, text, el):
             row["amount"] = money_from(txt(first(el, [".price", ".amount", ".cost"])) or text)
@@ -212,7 +212,7 @@ def register(mcp: MCPServer) -> None:
         description="Volunteer hours logged on your account, with the total.",
     )
     def list_volunteer_hours() -> dict[str, Any]:
-        loaded = client.get_first_page(routes.VOLUNTEER_HOURS, label="volunteer hours")
+        loaded = client.get_first_page(routes.VOLUNTEER_HOURS, label="volunteer hours", section="volunteer_hours")
 
         def enrich(row, text, el):
             hours_text = txt(first(el, [".hours", ".duration", ".time"])) or text

@@ -60,6 +60,10 @@ class ParentSquareClient:
         self._auth_checked = False
         #: Route candidates that already proved themselves, keyed by candidate tuple.
         self._route_cache: dict[tuple[str, ...], str] = {}
+        #: Sections resolved from the sidebar; None means "looked, found nothing".
+        self._discovered: dict[str, str | None] = {}
+        #: The page we mine for sidebar links. False means "tried, unavailable".
+        self._nav_cache: Page | bool | None = None
 
         self._load_session()
         if config.cookie:
@@ -124,8 +128,16 @@ class ParentSquareClient:
 
         return Page(soup=BeautifulSoup(html, "lxml"), html=html, url=final_url)
 
-    def get_first_page(self, candidates: Iterable[str], *, label: str = "page") -> Page:
-        """Try each candidate path in order; remember the one that worked."""
+    def get_first_page(
+        self, candidates: Iterable[str], *, label: str = "page", section: str | None = None
+    ) -> Page:
+        """Try each candidate path in order; remember the one that worked.
+
+        If every candidate fails and ``section`` names an entry in
+        ``routes.SECTION_KEYWORDS``, fall back to finding the section by its
+        sidebar label. Districts re-route these pages freely, so what the link
+        *says* is a better bet than guessing another URL.
+        """
         candidates = list(candidates)
         key = tuple(candidates)
         cached = self._route_cache.get(key)
@@ -145,11 +157,173 @@ class ParentSquareClient:
                 debug_log(f"{label}: using {candidate}")
                 return page
 
+        if section:
+            discovered = self.discover_section(section)
+            if discovered and discovered not in candidates:
+                try:
+                    page = self.get_page(discovered)
+                except (AuthError, RouteError, httpx.HTTPError) as err:
+                    last_error = err
+                else:
+                    if page is not None:
+                        self._route_cache[key] = discovered
+                        debug_log(f"{label}: discovered {discovered} from the sidebar")
+                        return page
+
+        hint = ""
+        if section:
+            hint = (
+                f" Also looked for a sidebar link labelled like "
+                f"{'/'.join(routes.SECTION_KEYWORDS.get(section, [])[:3])} and found "
+                f"{'nothing' if not self.discover_section(section) else 'a link that did not load'}."
+            )
         raise RouteError(
-            f"Could not load the {label} page. Tried: {', '.join(candidates)}. "
-            f"Last error: {last_error or 'unknown'}. If your district uses different URLs, fix them in "
-            "parentsquare_mcp/routes.py (run `python scripts/doctor.py` to find the right ones)."
+            f"Could not load the {label} page. Tried: {', '.join(candidates)}.{hint} "
+            f"Last error: {last_error or 'unknown'}. Fix the URL in parentsquare_mcp/routes.py — "
+            "`python scripts/doctor.py` reports the right one, and `debug_fetch` can show you the sidebar."
         )
+
+    # --------------------------------------------------------- nav discovery
+
+    def _nav_page(self) -> Page | None:
+        """The page whose sidebar we mine for section links. Fetched at most once."""
+        if self._nav_cache is not None:
+            return self._nav_cache or None
+        for candidate in routes.FEED:
+            try:
+                page = self.get_page(candidate, optional=True)
+            except (AuthError, httpx.HTTPError):
+                continue
+            if page is not None:
+                self._nav_cache = page
+                return page
+        self._nav_cache = False  # remember the miss, don't retry every call
+        return None
+
+    def _nav_anchors(self, page: Page) -> list[Any]:
+        """Collect sidebar / bottom-nav links; fall back to every anchor on the page."""
+        anchors: list[Any] = []
+        seen: set[int] = set()
+        for selector in ("nav a[href]", ".sidebar a[href]", "#sidebar a[href]", "aside a[href]"):
+            for anchor in page.soup.select(selector):
+                ident = id(anchor)
+                if ident in seen:
+                    continue
+                seen.add(ident)
+                anchors.append(anchor)
+        if not anchors:
+            anchors = list(page.soup.select("a[href]"))
+        return anchors
+
+    def _match_section_href(self, section: str, anchors: list[Any]) -> str | None:
+        """Pick the best href for ``section`` from a list of anchors."""
+        keywords = routes.SECTION_KEYWORDS.get(section, [])
+
+        # Student / school switchers are labelled with names, not "Students".
+        if section == "students":
+            for anchor in anchors:
+                href = anchor.get("href") or ""
+                if re.search(r"/students/\d+", href):
+                    return href
+        if section == "schools":
+            for anchor in anchors:
+                href = anchor.get("href") or ""
+                if re.search(r"/schools/\d+(/feeds)?/?$", href):
+                    return href
+
+        best: tuple[int, str] | None = None
+        for anchor in anchors:
+            text = anchor.get_text(" ", strip=True).lower()
+            href = anchor.get("href")
+            if not text or not href or len(text) > 48:
+                continue
+            for keyword in keywords:
+                if keyword not in text:
+                    continue
+                # Exact label beats a longer compound like "Photos, Videos, Files".
+                score = 0 if text == keyword else 1 if text.startswith(keyword) else 2 + len(text)
+                if best is None or score < best[0]:
+                    best = (score, href)
+        return best[1] if best else None
+
+    def discover_section(self, section: str) -> str | None:
+        """Find a section's real path by matching its sidebar (or More-menu) label."""
+        if section in self._discovered:
+            return self._discovered[section]
+
+        keywords = routes.SECTION_KEYWORDS.get(section, [])
+        found: str | None = None
+        page = self._nav_page() if (keywords or section in {"students", "schools"}) else None
+
+        if page is not None:
+            anchors = self._nav_anchors(page)
+            found = self._match_section_href(section, anchors)
+
+            # Polls / Files often live only under the bottom-nav "More" screen.
+            if found is None:
+                more_href = None
+                for anchor in anchors:
+                    text = anchor.get_text(" ", strip=True).lower()
+                    href = anchor.get("href")
+                    if href and text in {"more", "more features"}:
+                        more_href = href
+                        break
+                # Bottom-nav "More" is often JS-only; the school-scoped path still works.
+                if more_href is None:
+                    school_id = self._school_id_from_page(page)
+                    if school_id:
+                        more_href = f"/schools/{school_id}/more_features"
+                if more_href:
+                    try:
+                        more_page = self.get_page(more_href, optional=True)
+                    except (AuthError, httpx.HTTPError):
+                        more_page = None
+                    if more_page is not None:
+                        found = self._match_section_href(section, self._nav_anchors(more_page))
+                        if found is None:
+                            found = self._match_section_href(section, list(more_page.soup.select("a[href]")))
+
+            # Last resort: try well-known /schools/<id>/… paths (JS bottom-nav items).
+            if found is None:
+                school_id = self._school_id_from_page(page)
+                suffixes = routes.SCHOOL_SCOPED_SUFFIXES.get(section, [])
+                if school_id and suffixes:
+                    for suffix in suffixes:
+                        candidate = f"/schools/{school_id}/{suffix.lstrip('/')}"
+                        try:
+                            hit = self.get_page(candidate, optional=True)
+                        except (AuthError, httpx.HTTPError):
+                            continue
+                        if hit is None:
+                            continue
+                        # Reject soft redirects (e.g. /payments → /feeds).
+                        if not self._same_section_path(candidate, hit.url):
+                            continue
+                        found = candidate
+                        break
+
+            if found:
+                debug_log(f"discovered {section!r} at {found}")
+
+        self._discovered[section] = found
+        return found
+
+    def _same_section_path(self, requested: str, final_url: str) -> bool:
+        """True when ``final_url`` is still the page we asked for (query ignored)."""
+        req = urllib.parse.urlparse(self.url(requested)).path.rstrip("/")
+        got = urllib.parse.urlparse(final_url).path.rstrip("/")
+        return got == req or got.startswith(req + "/")
+
+    def _school_id_from_page(self, page: Page) -> str | None:
+        match = re.search(r"/schools/(\d+)", page.url or "")
+        if match:
+            return match.group(1)
+        for anchor in page.soup.select('a[href*="/schools/"]'):
+            href = anchor.get("href") or ""
+            m = re.search(r"/schools/(\d+)", href)
+            if m:
+                return m.group(1)
+        return None
 
     def try_json(self, path_or_url: str) -> Any | None:
         """Some ParentSquare views answer with JSON when asked politely."""
