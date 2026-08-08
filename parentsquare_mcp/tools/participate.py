@@ -29,27 +29,34 @@ from ..parsers import (
 GENERIC_ROWS = [
     ".list-item",
     ".item",
-    ".card",
-    "table tbody tr",
-    "li",
-    ".post",
     ".feed-item",
+    ".post",
+    "table tbody tr",
 ]
 DATE_SELECTORS = ["time", ".date", ".due-date", ".deadline", ".timestamp", "[datetime]"]
 TITLE_SELECTORS = [".title", ".name", ".subject", "h2", "h3", "h4", "a"]
 
 _DUE_RE = re.compile(r"\b(?:due|closes|deadline|by)\b[:\s]*([^\n]{3,60})", re.I)
 _STATUS_RE = re.compile(r"\b(signed|unsigned|completed|incomplete|pending|paid|unpaid|submitted|not submitted)\b", re.I)
+_JUNK_TITLE_RE = re.compile(
+    r"^(switch account|manage account|sign out|home|cancel|submit|add another account)$",
+    re.I,
+)
+_EMPTY_RE = re.compile(r"\bno (posts|polls|sign.?ups|items|forms|payments|results)\b", re.I)
 
 
 def _base_row(el: Any, base_url: str) -> dict[str, Any] | None:
+    # Account-switcher / nav chrome must never become a list row.
+    classes = " ".join(el.get("class") or [])
+    if "switch-account" in classes or el.select_one(".switch-accounts-header, #current-user-account-menu"):
+        return None
     text = txt(el)
     if not text or len(text) < 3:
         return None
     anchor = el.select_one("a[href]")
     href = anchor.get("href") if anchor else None
     title = txt(first(el, TITLE_SELECTORS)) or clamp(text.split("\n")[0], 200)
-    if not title:
+    if not title or _JUNK_TITLE_RE.match(title.strip()):
         return None
     return {
         "title": title,
@@ -60,9 +67,22 @@ def _base_row(el: Any, base_url: str) -> dict[str, Any] | None:
     }
 
 
+def _content_root(soup: Any) -> Any:
+    return first(soup, ["#feeds-list", "main#main-content", "main", "#main-content", "#content"]) or soup
+
+
+def _empty_message(soup: Any) -> str | None:
+    remark = first(soup, [".ps-remark", ".empty", ".no-results", ".blank-slate"])
+    text = txt(remark) if remark is not None else ""
+    if text and _EMPTY_RE.search(text):
+        return text
+    return None
+
+
 def _collect(page: Any, row_selectors: list[str], enrich) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
-    for el in rows(page.soup, row_selectors):
+    root = _content_root(page.soup)
+    for el in rows(root, row_selectors):
         row = _base_row(el, page.url)
         if row is None:
             continue
@@ -81,6 +101,14 @@ def _due_from(text: str) -> str | None:
 def _status_from(text: str) -> str | None:
     match = _STATUS_RE.search(text)
     return match.group(1).lower() if match else None
+
+
+def _wrap(page: Any, items: list[dict[str, Any]], key: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    empty = _empty_message(page.soup) if not items else None
+    if empty:
+        body = {"source": page.url, "count": 0, key: [], "note": empty, **(extra or {})}
+        return body
+    return result(items=items, page=page, source=page.url, key=key, extra=extra or {})
 
 
 def register(mcp: MCPServer) -> None:
@@ -225,13 +253,7 @@ def register(mcp: MCPServer) -> None:
         items = _collect(loaded, [".volunteer-hour", ".hour-entry", *GENERIC_ROWS], enrich)
         logged = [i["hours"] for i in items if i.get("hours") is not None]
 
-        return _wrap(
-            loaded,
-            items,
-            "entries",
-            extra={"total_hours": round(sum(logged), 2) if logged else None},
-        )
+        return _wrap(loaded, items, "entries", extra={"total_hours": round(sum(logged), 2) if logged else None})
 
 
-def _wrap(page: Any, items: list[dict[str, Any]], key: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
-    return result(items=items, page=page, source=page.url, key=key, extra=extra or {})
+# _wrap is defined above with empty-state handling.

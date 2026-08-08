@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Annotated, Any
 
 from mcp.server.mcpserver import MCPServer
@@ -44,39 +45,83 @@ def register(mcp: MCPServer) -> None:
         soup, url = loaded.soup, loaded.url
 
         schools: list[dict[str, Any]] = []
-        for el in rows(soup, SCHOOL_ROWS):
-            anchor = el.select_one('a[href*="/schools/"]') or el.select_one("a[href]")
-            href = anchor.get("href") if anchor else None
-            name = txt(first(el, [".school-name", ".name", ".title", "h2", "h3", "a"])) or clamp(txt(el).split("\n")[0], 120)
-            if not name:
-                continue
-            schools.append({"id": id_from(href, "schools"), "name": name, "url": abs_url(href, url)})
+        students: list[dict[str, Any]] = []
 
-        # Fall back to any /schools/<id> link anywhere on the page.
+        # Current ParentSquare: school + students live in the left switcher.
+        switcher = soup.select_one("#switch-institutes-menu")
+        if switcher is not None:
+            school_id = id_from(url, "schools")
+            for li in switcher.select("li.school-section"):
+                student_anchor = li.select_one('a[href*="/students/"]')
+                if student_anchor is not None:
+                    href = student_anchor.get("href")
+                    meta = txt(li.select_one(".truncate-text")) or ""
+                    grade = None
+                    school_name = None
+                    if "•" in meta:
+                        grade, _, school_name = [p.strip() for p in meta.partition("•")]
+                    elif meta:
+                        school_name = meta
+                    students.append(
+                        {
+                            "id": id_from(href, "students"),
+                            "name": txt(li.select_one("h4")) or txt(student_anchor),
+                            "school": school_name or None,
+                            "grade": grade or None,
+                            "url": abs_url(href, url),
+                        }
+                    )
+                else:
+                    name = txt(li.select_one("h4")) or txt(li)
+                    if not name:
+                        continue
+                    # Selected school often has no /schools/<id> link — use the page URL.
+                    schools.append(
+                        {
+                            "id": school_id,
+                            "name": name,
+                            "url": abs_url(f"/schools/{school_id}", url) if school_id else url,
+                        }
+                    )
+
         if not schools:
-            for anchor in soup.select('a[href*="/schools/"]'):
-                href = anchor.get("href")
-                name = txt(anchor)
+            for el in rows(soup, SCHOOL_ROWS):
+                anchor = el.select_one('a[href*="/schools/"]') or el.select_one("a[href]")
+                href = anchor.get("href") if anchor else None
+                name = txt(first(el, [".school-name", ".name", ".title", "h2", "h3", "a"])) or clamp(
+                    txt(el).split("\n")[0], 120
+                )
                 if not name:
                     continue
                 schools.append({"id": id_from(href, "schools"), "name": name, "url": abs_url(href, url)})
 
-        students: list[dict[str, Any]] = []
-        for el in rows(soup, STUDENT_ROWS):
-            anchor = el.select_one('a[href*="/students/"]') or el.select_one("a[href]")
-            href = anchor.get("href") if anchor else None
-            name = txt(first(el, [".student-name", ".name", "a"])) or clamp(txt(el).split("\n")[0], 120)
-            if not name:
-                continue
-            students.append(
-                {
-                    "id": id_from(href, "students"),
-                    "name": name,
-                    "school": txt(first(el, [".school", ".school-name"])) or None,
-                    "grade": txt(first(el, [".grade", ".grade-level"])) or None,
-                    "url": abs_url(href, url),
-                }
-            )
+        # Fall back only to clean /schools/<id> links — not every href that contains /schools/.
+        if not schools:
+            for anchor in soup.select('a[href*="/schools/"]'):
+                href = anchor.get("href") or ""
+                if not re.search(r"/schools/\d+(?:/feeds)?/?$", href.split("?")[0]):
+                    continue
+                name = txt(anchor)
+                if not name or len(name) > 80:
+                    continue
+                schools.append({"id": id_from(href, "schools"), "name": name, "url": abs_url(href, url)})
+
+        if not students:
+            for el in rows(soup, STUDENT_ROWS):
+                anchor = el.select_one('a[href*="/students/"]') or el.select_one("a[href]")
+                href = anchor.get("href") if anchor else None
+                name = txt(first(el, [".student-name", ".name", "a"])) or clamp(txt(el).split("\n")[0], 120)
+                if not name:
+                    continue
+                students.append(
+                    {
+                        "id": id_from(href, "students"),
+                        "name": name,
+                        "school": txt(first(el, [".school", ".school-name"])) or None,
+                        "grade": txt(first(el, [".grade", ".grade-level"])) or None,
+                        "url": abs_url(href, url),
+                    }
+                )
 
         body = result(items=dedupe(schools, "id"), page=loaded, source=url, key="schools")
         body["students"] = dedupe(students, "id")
@@ -170,6 +215,29 @@ def register(mcp: MCPServer) -> None:
                     "url": abs_url(href, url),
                 }
             )
+
+        # Many districts leave /groups nearly empty and only list groups in the feed filter.
+        if not items:
+            feed_candidates = routes.school_feed(school_id) if school_id else routes.FEED
+            feed = client.get_first_page(feed_candidates, label="feed", section="feed")
+            soup, url = feed.soup, feed.url
+            for anchor in soup.select('a[href*="/groups/"]'):
+                href = anchor.get("href") or ""
+                name = txt(anchor)
+                group_id = id_from(href, "groups")
+                if not name or not group_id or len(name) > 120:
+                    continue
+                items.append(
+                    {
+                        "id": group_id,
+                        "name": name,
+                        "description": None,
+                        "member_count": None,
+                        "is_member": True,
+                        "url": abs_url(href, url),
+                    }
+                )
+            loaded = feed
 
         items = dedupe(items, "id")
         if query:

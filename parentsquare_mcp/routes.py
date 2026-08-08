@@ -45,7 +45,11 @@ def group_feed(group_id: str) -> list[str]:
 
 
 def conversation(conversation_id: str) -> list[str]:
-    return [f"/conversations/{conversation_id}", f"/messages/{conversation_id}"]
+    return [
+        f"/conversations/{conversation_id}",
+        f"/messages/{conversation_id}",
+        f"/chats/{conversation_id}",
+    ]
 
 
 def school_directory(school_id: str) -> list[str]:

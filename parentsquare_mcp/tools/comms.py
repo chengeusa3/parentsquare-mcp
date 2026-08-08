@@ -16,6 +16,7 @@ from ..parsers import (
     abs_url,
     attachments,
     clamp,
+    count_from,
     date_from,
     dedupe,
     email_from,
@@ -30,6 +31,9 @@ from ..parsers import (
 )
 
 CONVERSATION_ROWS = [
+    "a.a-chat-thread",
+    "[data-testid^='chat-thread-item-']",
+    ".a-chat-thread",
     ".conversation",
     ".conversation-item",
     ".message-thread",
@@ -70,19 +74,52 @@ def register(mcp: MCPServer) -> None:
             text = txt(el)
             if not text:
                 continue
-            anchor = el.select_one("a[href]")
-            href = (anchor.get("href") if anchor else None) or el.get("data-href")
+            # Current ParentSquare uses <a class="a-chat-thread"> as the row itself.
+            href = el.get("href") if el.name == "a" else None
+            if not href:
+                anchor = el.select_one("a[href]")
+                href = (anchor.get("href") if anchor else None) or el.get("data-href")
             first_cell = el.select_one("td:first-child")
+
+            with_name = txt(
+                first(
+                    el,
+                    [
+                        "[class^='user-thread-chat-name-']",
+                        ".users",
+                        ".participants",
+                        ".with",
+                        ".name",
+                        ".sender",
+                    ],
+                )
+                or first_cell
+            )
+            aria = el.get("aria-label") or ""
+            if not with_name and aria.lower().startswith("conversation with "):
+                with_name = aria.split(".", 1)[0].removeprefix("Conversation with ").strip()
+
+            preview_el = first(el, [".chat-message", ".preview", ".snippet", ".last-message", ".body"])
+            preview = clamp(txt(preview_el) if preview_el is not None else "", 300)
+            if not preview:
+                # Drop the header lines (names / "15 Messages" / date) and keep the rest.
+                lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+                preview = clamp("\n".join(lines[3:]) if len(lines) > 3 else text, 300)
+
+            badge = txt(el.select_one(".badge"))
+            message_count = int(badge) if badge.isdigit() else count_from(text, "messages?")
 
             items.append(
                 {
-                    "id": el.get("data-conversation-id") or id_from(href, "conversations", "messages"),
-                    "with": txt(first(el, [".participants", ".with", ".name", ".sender"]) or first_cell) or None,
+                    "id": el.get("data-conversation-id")
+                    or id_from(href, "chats", "conversations", "messages"),
+                    "with": with_name or None,
                     "subject": txt(first(el, [".subject", ".title", ".conversation-subject"])) or None,
-                    "preview": clamp(txt(first(el, [".preview", ".snippet", ".last-message", ".body"])) or text, 300),
+                    "preview": preview or None,
                     "date": date_from(el, DATE_SELECTORS),
+                    "message_count": message_count,
                     "unread": "unread" in " ".join(el.get("class") or []).lower()
-                    or el.select_one(".unread, .badge") is not None,
+                    or el.select_one(".unread, .badge-danger, .badge-primary") is not None,
                     "url": abs_url(href, loaded.url),
                 }
             )
@@ -106,9 +143,14 @@ def register(mcp: MCPServer) -> None:
             bool, Field(description="Download and inline images/PDFs sent in the thread.")
         ] = False,
     ):
-        loaded = client.get_first_page(
-            routes.conversation(conversation_id), label=f"conversation {conversation_id}"
-        )
+        loaded = None
+        # Prefer the school-scoped chats URL when sidebar discovery found one.
+        chats_root = client.discover_section("conversations")
+        candidates = []
+        if chats_root and "/chats" in chats_root:
+            candidates.append(f"{chats_root.rstrip('/')}/{conversation_id}")
+        candidates.extend(routes.conversation(conversation_id))
+        loaded = client.get_first_page(candidates, label=f"conversation {conversation_id}")
         soup, url = loaded.soup, loaded.url
 
         messages: list[dict[str, Any]] = []
